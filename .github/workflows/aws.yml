@@ -1,36 +1,56 @@
-# This is a basic workflow to help you get started with Actions
+name: Full Deployment
+run-name: Create Environment and Run Deployment via Terraform
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+  push:
+    branches: [ "nnatai" ]
+  #pull_request:
+  #  branches: [ "main_test" ]
+  #  workflow_dispatch: 
+env:
+  AWS_REGION: ap-southeast-2
+  PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+  #HOSTNAME: ${{ secrets.SSH_HOST }}
+  USER_NAME: ${{ secrets.SSH_USER_NAME }}
+  FORCE_COLOR: true 
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+permissions:
+  contents: read
+
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  CreateEnvTerraform:
+    name: Create Env By Terraform
     runs-on: ubuntu-latest
+    environment: production
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    - name: init terraform
+      run: terraform init 
+    - name: plan terraform
+      run: terraform plan
+    - name: apply terraform
+      run: terraform apply --auto-approve
+    - name: get terraform raw output
+      run: terraform output -raw eip-public-ip
+    - name: update public ip to github secret
+      run: echo ip=$(terraform output -raw eip-public-ip) >> $GITHUB_ENV
+    - name: deploy code to terraform environment
+      run: |
+        echo "$PRIVATE_KEY" > private_key.pem && chmod 600 private_key.pem
+        ssh -o StrictHostKeyChecking=no -i "private_key.pem" ${USER_NAME}@$ip '
+          echo "<h1>Hi -- This is Github Action Pipeline --- This is latest code with env that created by terraform </h1>" | sudo tee /var/www/html/index.nginx-debian.html
+        '
+    - name: testing site that created by terraform
+      run: curl http://$ip
+    - name: destroy terraform 
+      run: terraform destroy --auto-approve
